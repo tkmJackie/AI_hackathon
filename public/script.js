@@ -11,9 +11,8 @@ const customerSendButton = document.getElementById("customerSendButton");
 const agentSendButton = document.getElementById("agentSendButton");
 
 const resetButton = document.getElementById("resetButton");
-const quickChips = document.querySelectorAll(".quick-chip");
 
-const STORAGE_KEY = "soft-cs-one-page-history";
+const STORAGE_KEY = "soft-conversation-history";
 
 init();
 
@@ -22,12 +21,12 @@ function init() {
 
   customerForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    handleSend("customer");
+    handleSend("personA");
   });
 
   agentForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    handleSend("agent");
+    handleSend("personB");
   });
 
   resetButton.addEventListener("click", () => {
@@ -37,23 +36,6 @@ function init() {
 
     localStorage.removeItem(STORAGE_KEY);
     renderAll();
-  });
-
-  quickChips.forEach((chip) => {
-    chip.addEventListener("click", () => {
-      const target = chip.dataset.target;
-      const text = chip.dataset.text || "";
-
-      if (target === "customer") {
-        customerInput.value = text;
-        customerInput.focus();
-      }
-
-      if (target === "agent") {
-        agentInput.value = text;
-        agentInput.focus();
-      }
-    });
   });
 }
 
@@ -72,8 +54,8 @@ function saveMessages(messages) {
 function renderAll() {
   const messages = loadMessages().sort((a, b) => a.createdAt - b.createdAt);
 
-  renderPanel(customerMessages, messages, "customer");
-  renderPanel(agentMessages, messages, "agent");
+  renderPanel(customerMessages, messages, "personA");
+  renderPanel(agentMessages, messages, "personB");
 }
 
 function renderPanel(container, messages, viewerRole) {
@@ -84,7 +66,7 @@ function renderPanel(container, messages, viewerRole) {
     empty.className = "empty-state";
     empty.innerHTML = `
       <p>まだ会話はありません。</p>
-      <p>左右どちらかから、強めの言葉を送信してみてください。</p>
+      <p>Aさん、またはBさんとしてメッセージを送信してみてください。</p>
     `;
     container.appendChild(empty);
     return;
@@ -113,14 +95,10 @@ function renderPanel(container, messages, viewerRole) {
       badge.className = "original-badge";
       badge.textContent = "原文表示";
     } else {
-      meta.textContent =
-        message.from === "customer"
-          ? "お客さまから受信"
-          : "従業員から受信";
-
+      meta.textContent = message.from === "personA" ? "Aさんから受信" : "Bさんから受信";
       text.textContent = message.softened;
       badge.className = "ai-badge";
-      badge.textContent = "AIで柔らかく変換";
+      badge.textContent = "AIでやわらかく変換";
     }
 
     bubble.appendChild(meta);
@@ -134,8 +112,8 @@ function renderPanel(container, messages, viewerRole) {
 }
 
 async function handleSend(from) {
-  const input = from === "customer" ? customerInput : agentInput;
-  const button = from === "customer" ? customerSendButton : agentSendButton;
+  const input = from === "personA" ? customerInput : agentInput;
+  const button = from === "personA" ? customerSendButton : agentSendButton;
 
   const original = input.value.trim();
 
@@ -147,7 +125,7 @@ async function handleSend(from) {
   setSending(button, true);
 
   try {
-    const softened = await softenMessage(original, from);
+    const softened = await softenMessage(original);
 
     const message = {
       id: crypto.randomUUID(),
@@ -171,10 +149,7 @@ async function handleSend(from) {
   }
 }
 
-async function softenMessage(text, from) {
-  const direction =
-    from === "customer" ? "customer_to_agent" : "agent_to_customer";
-
+async function softenMessage(text) {
   const response = await fetch("/api/soften", {
     method: "POST",
     headers: {
@@ -182,7 +157,7 @@ async function softenMessage(text, from) {
     },
     body: JSON.stringify({
       text,
-      direction
+      mode: "general_conversation"
     })
   });
 
@@ -202,8 +177,8 @@ function setSending(button, isSending) {
 
 function getDefaultButtonText(button) {
   if (button.id === "customerSendButton") {
-    return "お客さまとして送信";
+    return "Aさんとして送信";
   }
 
-  return "従業員として送信";
+  return "Bさんとして送信";
 }
