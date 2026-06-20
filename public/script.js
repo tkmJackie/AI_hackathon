@@ -1,100 +1,237 @@
-const convertForm = document.getElementById("convertForm");
-const originalText = document.getElementById("originalText");
-const softText = document.getElementById("softText");
-const toneLevel = document.getElementById("toneLevel");
-const convertButton = document.getElementById("convertButton");
-const copyButton = document.getElementById("copyButton");
+const params = new URLSearchParams(location.search);
+const role = params.get("role") === "agent" ? "agent" : "customer";
+const room = params.get("room") || "demo";
+
+const roleBadge = document.getElementById("roleBadge");
+const roomLabel = document.getElementById("roomLabel");
+const chatTitle = document.getElementById("chatTitle");
+const chatSubTitle = document.getElementById("chatSubTitle");
+const messageList = document.getElementById("messageList");
+const chatForm = document.getElementById("chatForm");
+const messageInput = document.getElementById("messageInput");
 const sendButton = document.getElementById("sendButton");
-const chatMessages = document.getElementById("chatMessages");
+const resetButton = document.getElementById("resetButton");
+const openCustomerLink = document.getElementById("openCustomerLink");
+const openAgentLink = document.getElementById("openAgentLink");
+const quickChips = document.querySelectorAll(".quick-chip");
 
-function addMessage(text, type) {
-  const message = document.createElement("div");
-  message.className = `message ${type}`;
+const channel = new BroadcastChannel(`soft-cs-${room}`);
+const STORAGE_KEY = `soft-cs-history-${room}`;
 
-  const p = document.createElement("p");
-  p.textContent = text;
+const ROLE_LABEL = {
+  customer: "お客さま画面",
+  agent: "従業員画面"
+};
 
-  message.appendChild(p);
-  chatMessages.appendChild(message);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-}
+init();
 
-function setLoading(isLoading) {
-  convertButton.disabled = isLoading;
-  convertButton.textContent = isLoading
-    ? "変換中..."
-    : "柔らかい言葉に変換";
-}
+function init() {
+  setupHeader();
+  renderMessages(loadMessages());
 
-convertForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
+  chatForm.addEventListener("submit", handleSend);
+  resetButton.addEventListener("click", handleReset);
 
-  const text = originalText.value.trim();
-
-  if (!text) {
-    alert("文章を入力してください。");
-    return;
-  }
-
-  setLoading(true);
-  softText.value = "";
-
-  try {
-    const response = await fetch("/api/soften", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        text,
-        tone: toneLevel.value
-      })
+  quickChips.forEach((chip) => {
+    chip.addEventListener("click", () => {
+      messageInput.value = chip.dataset.quick || "";
+      messageInput.focus();
     });
+  });
 
-    const data = await response.json();
+  channel.onmessage = (event) => {
+    const data = event.data;
 
-    if (!response.ok) {
-      throw new Error(data.error || "変換に失敗しました。");
+    if (data.type === "new-message") {
+      const messages = loadMessages();
+      if (!messages.some((m) => m.id === data.message.id)) {
+        messages.push(data.message);
+        saveMessages(messages);
+      }
+      renderMessages(loadMessages());
     }
 
-    // ここではチャット欄に追加しない
-    // 変換結果エリアにだけ表示する
-    softText.value = data.result;
+    if (data.type === "reset") {
+      localStorage.removeItem(STORAGE_KEY);
+      renderMessages([]);
+    }
+  };
+
+  window.addEventListener("storage", (event) => {
+    if (event.key === STORAGE_KEY) {
+      renderMessages(loadMessages());
+    }
+  });
+}
+
+function setupHeader() {
+  roleBadge.textContent = ROLE_LABEL[role];
+  roleBadge.className = `role-badge ${role}`;
+  roomLabel.textContent = room;
+
+  if (role === "customer") {
+    chatTitle.textContent = "お客さまチャット";
+    chatSubTitle.textContent =
+      "あなたの送信文はそのまま表示され、従業員側には柔らかく変換された文が届きます。";
+  } else {
+    chatTitle.textContent = "従業員チャット";
+    chatSubTitle.textContent =
+      "あなたの送信文はそのまま表示され、お客さま側には柔らかく変換された文が届きます。";
+  }
+
+  openCustomerLink.href = `${location.pathname}?role=customer&room=${encodeURIComponent(room)}`;
+  openAgentLink.href = `${location.pathname}?role=agent&room=${encodeURIComponent(room)}`;
+}
+
+function loadMessages() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveMessages(messages) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+}
+
+function renderMessages(messages) {
+  messageList.innerHTML = "";
+
+  if (!messages.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.innerHTML = `
+      <p>まだメッセージはありません。</p>
+      <p>別タブでお客さま画面・従業員画面を開いて送信してみてください。</p>
+    `;
+    messageList.appendChild(empty);
+    return;
+  }
+
+  messages
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .forEach((message) => {
+      const isSelf = message.from === role;
+      const row = document.createElement("div");
+      row.className = `message-row ${isSelf ? "self" : "other"}`;
+
+      const bubble = document.createElement("div");
+      bubble.className = "message-bubble";
+
+      const meta = document.createElement("div");
+      meta.className = "message-meta";
+
+      const text = document.createElement("div");
+      text.className = "message-text";
+
+      if (isSelf) {
+        meta.textContent = "あなたが送信";
+        text.textContent = message.original;
+      } else {
+        meta.textContent =
+          message.from === "customer"
+            ? "お客さまから受信"
+            : "従業員から受信";
+
+        text.textContent = message.softened;
+
+        const aiBadge = document.createElement("div");
+        aiBadge.className = "ai-badge";
+        aiBadge.textContent = "AIで柔らかく変換";
+        bubble.appendChild(aiBadge);
+      }
+
+      bubble.prepend(text);
+      bubble.prepend(meta);
+      row.appendChild(bubble);
+      messageList.appendChild(row);
+    });
+
+  messageList.scrollTop = messageList.scrollHeight;
+}
+
+async function handleSend(event) {
+  event.preventDefault();
+
+  const original = messageInput.value.trim();
+  if (!original) {
+    alert("メッセージを入力してください。");
+    return;
+  }
+
+  setSending(true);
+
+  try {
+    const softened = await softenMessage(original);
+
+    const message = {
+      id: crypto.randomUUID(),
+      room,
+      from: role,
+      original,
+      softened,
+      createdAt: Date.now()
+    };
+
+    const messages = loadMessages();
+    messages.push(message);
+    saveMessages(messages);
+    renderMessages(messages);
+
+    channel.postMessage({
+      type: "new-message",
+      message
+    });
+
+    messageInput.value = "";
+    messageInput.focus();
   } catch (error) {
     console.error(error);
-    alert(error.message || "エラーが発生しました。");
+    alert(error.message || "送信に失敗しました。");
   } finally {
-    setLoading(false);
+    setSending(false);
   }
-});
+}
 
-copyButton.addEventListener("click", async () => {
-  const text = softText.value.trim();
+async function softenMessage(text) {
+  const direction =
+    role === "customer" ? "customer_to_agent" : "agent_to_customer";
 
-  if (!text) {
-    alert("コピーする文章がありません。");
+  const response = await fetch("/api/soften", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      text,
+      direction
+    })
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.error || "AI変換に失敗しました。");
+  }
+
+  return data.result;
+}
+
+function handleReset() {
+  if (!confirm("このルームの会話をリセットしますか？")) {
     return;
   }
 
-  await navigator.clipboard.writeText(text);
-  copyButton.textContent = "コピーしました";
+  localStorage.removeItem(STORAGE_KEY);
+  renderMessages([]);
 
-  setTimeout(() => {
-    copyButton.textContent = "コピー";
-  }, 1200);
-});
+  channel.postMessage({
+    type: "reset"
+  });
+}
 
-sendButton.addEventListener("click", () => {
-  const text = softText.value.trim();
-
-  if (!text) {
-    alert("送信する文章がありません。");
-    return;
-  }
-
-  // チャット欄に表示するのは送信ボタンを押した時だけ
-  addMessage(text, "soft");
-
-  originalText.value = "";
-  softText.value = "";
-});
+function setSending(isSending) {
+  sendButton.disabled = isSending;
+  sendButton.textContent = isSending ? "変換して送信中..." : "送信する";
+}
