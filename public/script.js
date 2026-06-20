@@ -1,86 +1,60 @@
-const params = new URLSearchParams(location.search);
-const role = params.get("role") === "agent" ? "agent" : "customer";
-const room = params.get("room") || "demo";
+const customerMessages = document.getElementById("customerMessages");
+const agentMessages = document.getElementById("agentMessages");
 
-const roleBadge = document.getElementById("roleBadge");
-const roomLabel = document.getElementById("roomLabel");
-const chatTitle = document.getElementById("chatTitle");
-const chatSubTitle = document.getElementById("chatSubTitle");
-const messageList = document.getElementById("messageList");
-const chatForm = document.getElementById("chatForm");
-const messageInput = document.getElementById("messageInput");
-const sendButton = document.getElementById("sendButton");
+const customerForm = document.getElementById("customerForm");
+const agentForm = document.getElementById("agentForm");
+
+const customerInput = document.getElementById("customerInput");
+const agentInput = document.getElementById("agentInput");
+
+const customerSendButton = document.getElementById("customerSendButton");
+const agentSendButton = document.getElementById("agentSendButton");
+
 const resetButton = document.getElementById("resetButton");
-const openCustomerLink = document.getElementById("openCustomerLink");
-const openAgentLink = document.getElementById("openAgentLink");
 const quickChips = document.querySelectorAll(".quick-chip");
 
-const channel = new BroadcastChannel(`soft-cs-${room}`);
-const STORAGE_KEY = `soft-cs-history-${room}`;
-
-const ROLE_LABEL = {
-  customer: "お客さま画面",
-  agent: "従業員画面"
-};
+const STORAGE_KEY = "soft-cs-one-page-history";
 
 init();
 
 function init() {
-  setupHeader();
-  renderMessages(loadMessages());
+  renderAll();
 
-  chatForm.addEventListener("submit", handleSend);
-  resetButton.addEventListener("click", handleReset);
+  customerForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    handleSend("customer");
+  });
+
+  agentForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    handleSend("agent");
+  });
+
+  resetButton.addEventListener("click", () => {
+    if (!confirm("会話をリセットしますか？")) {
+      return;
+    }
+
+    localStorage.removeItem(STORAGE_KEY);
+    renderAll();
+  });
 
   quickChips.forEach((chip) => {
     chip.addEventListener("click", () => {
-      messageInput.value = chip.dataset.quick || "";
-      messageInput.focus();
+      const target = chip.dataset.target;
+      const text = chip.dataset.text || "";
+
+      if (target === "customer") {
+        customerInput.value = text;
+        customerInput.focus();
+      }
+
+      if (target === "agent") {
+        agentInput.value = text;
+        agentInput.focus();
+      }
     });
   });
-
-  channel.onmessage = (event) => {
-    const data = event.data;
-
-    if (data.type === "new-message") {
-      const messages = loadMessages();
-      if (!messages.some((m) => m.id === data.message.id)) {
-        messages.push(data.message);
-        saveMessages(messages);
-      }
-      renderMessages(loadMessages());
-    }
-
-    if (data.type === "reset") {
-      localStorage.removeItem(STORAGE_KEY);
-      renderMessages([]);
-    }
-  };
-
-  window.addEventListener("storage", (event) => {
-    if (event.key === STORAGE_KEY) {
-      renderMessages(loadMessages());
-    }
-  });
-}
-
-function setupHeader() {
-  roleBadge.textContent = ROLE_LABEL[role];
-  roleBadge.className = `role-badge ${role}`;
-  roomLabel.textContent = room;
-
-  if (role === "customer") {
-    chatTitle.textContent = "お客さまチャット";
-    chatSubTitle.textContent =
-      "あなたの送信文はそのまま表示され、従業員側には柔らかく変換された文が届きます。";
-  } else {
-    chatTitle.textContent = "従業員チャット";
-    chatSubTitle.textContent =
-      "あなたの送信文はそのまま表示され、お客さま側には柔らかく変換された文が届きます。";
-  }
-
-  openCustomerLink.href = `${location.pathname}?role=customer&room=${encodeURIComponent(room)}`;
-  openAgentLink.href = `${location.pathname}?role=agent&room=${encodeURIComponent(room)}`;
 }
 
 function loadMessages() {
@@ -95,80 +69,89 @@ function saveMessages(messages) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
 }
 
-function renderMessages(messages) {
-  messageList.innerHTML = "";
+function renderAll() {
+  const messages = loadMessages().sort((a, b) => a.createdAt - b.createdAt);
+
+  renderPanel(customerMessages, messages, "customer");
+  renderPanel(agentMessages, messages, "agent");
+}
+
+function renderPanel(container, messages, viewerRole) {
+  container.innerHTML = "";
 
   if (!messages.length) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
     empty.innerHTML = `
-      <p>まだメッセージはありません。</p>
-      <p>別タブでお客さま画面・従業員画面を開いて送信してみてください。</p>
+      <p>まだ会話はありません。</p>
+      <p>左右どちらかから、強めの言葉を送信してみてください。</p>
     `;
-    messageList.appendChild(empty);
+    container.appendChild(empty);
     return;
   }
 
-  messages
-    .sort((a, b) => a.createdAt - b.createdAt)
-    .forEach((message) => {
-      const isSelf = message.from === role;
-      const row = document.createElement("div");
-      row.className = `message-row ${isSelf ? "self" : "other"}`;
+  messages.forEach((message) => {
+    const isSelf = message.from === viewerRole;
 
-      const bubble = document.createElement("div");
-      bubble.className = "message-bubble";
+    const row = document.createElement("div");
+    row.className = `message-row ${isSelf ? "self" : "other"}`;
 
-      const meta = document.createElement("div");
-      meta.className = "message-meta";
+    const bubble = document.createElement("div");
+    bubble.className = "message-bubble";
 
-      const text = document.createElement("div");
-      text.className = "message-text";
+    const meta = document.createElement("div");
+    meta.className = "message-meta";
 
-      if (isSelf) {
-        meta.textContent = "あなたが送信";
-        text.textContent = message.original;
-      } else {
-        meta.textContent =
-          message.from === "customer"
-            ? "お客さまから受信"
-            : "従業員から受信";
+    const text = document.createElement("div");
+    text.className = "message-text";
 
-        text.textContent = message.softened;
+    const badge = document.createElement("div");
 
-        const aiBadge = document.createElement("div");
-        aiBadge.className = "ai-badge";
-        aiBadge.textContent = "AIで柔らかく変換";
-        bubble.appendChild(aiBadge);
-      }
+    if (isSelf) {
+      meta.textContent = "自分が送信した原文";
+      text.textContent = message.original;
+      badge.className = "original-badge";
+      badge.textContent = "原文表示";
+    } else {
+      meta.textContent =
+        message.from === "customer"
+          ? "お客さまから受信"
+          : "従業員から受信";
 
-      bubble.prepend(text);
-      bubble.prepend(meta);
-      row.appendChild(bubble);
-      messageList.appendChild(row);
-    });
+      text.textContent = message.softened;
+      badge.className = "ai-badge";
+      badge.textContent = "AIで柔らかく変換";
+    }
 
-  messageList.scrollTop = messageList.scrollHeight;
+    bubble.appendChild(meta);
+    bubble.appendChild(text);
+    bubble.appendChild(badge);
+    row.appendChild(bubble);
+    container.appendChild(row);
+  });
+
+  container.scrollTop = container.scrollHeight;
 }
 
-async function handleSend(event) {
-  event.preventDefault();
+async function handleSend(from) {
+  const input = from === "customer" ? customerInput : agentInput;
+  const button = from === "customer" ? customerSendButton : agentSendButton;
 
-  const original = messageInput.value.trim();
+  const original = input.value.trim();
+
   if (!original) {
     alert("メッセージを入力してください。");
     return;
   }
 
-  setSending(true);
+  setSending(button, true);
 
   try {
-    const softened = await softenMessage(original);
+    const softened = await softenMessage(original, from);
 
     const message = {
       id: crypto.randomUUID(),
-      room,
-      from: role,
+      from,
       original,
       softened,
       createdAt: Date.now()
@@ -177,26 +160,20 @@ async function handleSend(event) {
     const messages = loadMessages();
     messages.push(message);
     saveMessages(messages);
-    renderMessages(messages);
 
-    channel.postMessage({
-      type: "new-message",
-      message
-    });
-
-    messageInput.value = "";
-    messageInput.focus();
+    input.value = "";
+    renderAll();
   } catch (error) {
     console.error(error);
     alert(error.message || "送信に失敗しました。");
   } finally {
-    setSending(false);
+    setSending(button, false);
   }
 }
 
-async function softenMessage(text) {
+async function softenMessage(text, from) {
   const direction =
-    role === "customer" ? "customer_to_agent" : "agent_to_customer";
+    from === "customer" ? "customer_to_agent" : "agent_to_customer";
 
   const response = await fetch("/api/soften", {
     method: "POST",
@@ -218,20 +195,15 @@ async function softenMessage(text) {
   return data.result;
 }
 
-function handleReset() {
-  if (!confirm("このルームの会話をリセットしますか？")) {
-    return;
-  }
-
-  localStorage.removeItem(STORAGE_KEY);
-  renderMessages([]);
-
-  channel.postMessage({
-    type: "reset"
-  });
+function setSending(button, isSending) {
+  button.disabled = isSending;
+  button.textContent = isSending ? "AI変換中..." : getDefaultButtonText(button);
 }
 
-function setSending(isSending) {
-  sendButton.disabled = isSending;
-  sendButton.textContent = isSending ? "変換して送信中..." : "送信する";
+function getDefaultButtonText(button) {
+  if (button.id === "customerSendButton") {
+    return "お客さまとして送信";
+  }
+
+  return "従業員として送信";
 }
